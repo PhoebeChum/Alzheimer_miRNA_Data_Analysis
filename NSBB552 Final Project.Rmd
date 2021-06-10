@@ -1,0 +1,411 @@
+---
+title: "NSBB552 Final Project (2021) - Phoebe Chum"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_notebook: default
+  word_document: default
+---
+
+# **"Cerebrovascular miRNA Profile in Alzheimer's Disease"**
+
+## Approach
+
+### **Mice Model**
+
+Triple transgenic Alzheimer's disease "3xTg-AD" mouse model with three human genes Amyloid-beta precursor protein (APP), Presenilin 1 (PSEN1), and Microtubule-associated protein tau (MAPT).
+
+### Tissue Type
+
+Whole brain cerebral vessels.
+
+### Study Design
+
+-   Sample groups:
+
+    -   Young control (YC; 1-2 mo)
+
+    -   Cognitive impairment (CI; 4-5 mo)
+
+    -   Amyloid-beta (AB; 6-8 mo)
+
+    -   AB+Tau (ABT; greater than 12 mo).
+
+-   n = 3 males and 3 females for each of the four groups.
+
+-   Total RNA was extracted from the vessels and sent to NanoString for miRNA expression panel.
+
+-   miRNA expression was then analyzed with DESeq2.
+
+### **Hypothesis**
+
+*Cerebrovascular microRNA (miRNA) expression profiles corresponding to post-transcriptional regulation can provide a diagnostic map of the early development of AD pathology.*\
+\
+
+## Packages
+
+```{r}
+library(DESeq2)
+library(pheatmap)
+library(gplots)
+library(ggplot2)
+```
+
+### Resources
+
+Tutorial:
+
+1.  <https://www.youtube.com/watch?v=wPzeea1Do18>
+
+Documentation:
+
+1.  <http://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#countmat>
+
+2.  <https://leaherb.com/add-gradient-colors-to-bar-chart-with-ggplot/>
+
+3.  <https://stackoverflow.com/questions/48633302/reordering-bars-in-a-group-with-ggplot-and-adjusting-groups-by-width>
+
+## Input Data
+
+Load count matrix and coldata
+
+```{r}
+cts <-read.csv("Raw Data_Formatted.csv", header = T, row.names = 1)
+
+coldata <-read.csv("MetaData.csv", header = T, row.names = 1)
+```
+
+```{r}
+head(cts,10)
+```
+
+```{r}
+coldata
+```
+
+Build an DESeqDataSet from a count matrix and a table of sample information
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = cts,
+                              colData = coldata,
+                              design = ~Age + Sex)
+
+```
+
+Pre-filtering the dataset/remove rows with zero count
+
+```{r}
+dds <- dds[ rowSums(counts(dds)) > 12, ]
+```
+
+Differential expression analysis with
+
+```{r}
+ddsDE <-DESeq(dds)
+```
+
+Export normalized read counts
+
+```{r}
+normCounts <-counts(ddsDE, normalized = T)
+write.csv(normCounts, "normal.all4.csv")
+```
+
+### Extract result
+
+specify the two groups for comparison
+
+#### MCI vs YC
+
+```{r}
+res1 <- results(ddsDE, contrast=c("Age", "MCI", "YC"))
+res1
+summary(res1)
+resultsNames(ddsDE)
+```
+
+#### AB vs YC
+
+```{r}
+res2 <- results(ddsDE, contrast=c("Age", "AB", "YC"))
+res2
+summary(res2)
+```
+
+#### ABT vs YC
+
+```{r}
+res3 <- results(ddsDE, contrast=c("Age", "ABT", "YC"))
+res3
+summary(res3)
+```
+
+## Exploratory Data Analysis (EDA)
+
+```{r}
+plotMA(ddsDE)
+```
+
+### Data Transformation
+
+```{r}
+dds <- estimateSizeFactors(dds)
+dds <- estimateDispersions(dds)
+vsd <- varianceStabilizingTransformation(dds)
+```
+
+### Heatmap
+
+```{r}
+library(pheatmap)
+select <- order(rowMeans(counts(dds,normalized=TRUE)),
+                decreasing=TRUE)
+df <- as.data.frame(colData(dds)[,c("Age","Sex")])
+pheatmap(assay(vsd)[select,], cluster_rows=FALSE, show_rownames=FALSE,
+         cluster_cols=TRUE, annotation_col=df)
+```
+
+### PCA
+
+```{r}
+library(ggplot2)
+pcaData <- plotPCA(vsd, intgroup=c("Age", "Sex"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=Age, shape=Sex)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+```
+
+## Log2 Fold Change Comparison
+
+### MCI vs YC
+
+Convert result into data frame, the filter
+
+```{r}
+res1 <- as.data.frame(res1)
+res1p <- res1[res1$pvalue<0.05,]
+res1padj <- res1[res1$padj<0.05,]
+res1logUp <- res1[res1$log2FoldChange>=1,]
+res1logDown <- res1[res1$log2FoldChange<=-1,]
+
+res1logUp
+res1logDown
+```
+
+**Comments:**
+
++-----------------------------+-------------------+--------------+----------------+
+| log2 Fold Change Comparison | Criteria          | Up-regulated | Down-regulated |
++=============================+===================+==============+================+
+| MCI vs YC                   | Up-regulated:     | 7 miRNAs     | 3 miRNAs       |
+|                             |                   |              |                |
+| (n=6 v 6)                   | Fold-change \>=1  |              |                |
+|                             |                   |              |                |
+|                             | Down-regulated:   |              |                |
+|                             |                   |              |                |
+|                             | Fold-change \<=-1 |              |                |
++-----------------------------+-------------------+--------------+----------------+
+
+```{r}
+MCI_log2 <-read.csv("MCI vs YC_log2.csv", header = T, row.names = 1)
+
+ggplot(data = MCI_log2, 
+       aes(x = miRNA, y = Log2FoldChange,
+           )) + 
+  geom_bar(stat = "identity", aes(fill = Log2FoldChange), position=position_dodge()) + 
+  ylab("Log2 Fold Change") + 
+  coord_flip() + scale_fill_gradient2(low='orange', mid='snow', high='blue')
+```
+
+### AB vs YC
+
+Convert result into data frame, the filter
+
+```{r}
+res2 <- as.data.frame(res2)
+res2p <- res2[res2$pvalue<0.05,]
+res2padj <- res2[res2$padj<0.05,]
+res2logUp <- res2[res2$log2FoldChange>=1,]
+res2logDown <- res2[res2$log2FoldChange<=-1,]
+
+res2logUp
+res2logDown
+```
+
+**Comments:**
+
++-----------------------------+-------------------+--------------+----------------+
+| log2 Fold Change Comparison | Criteria          | Up-regulated | Down-regulated |
++=============================+===================+==============+================+
+| AB vs YC                    | Up-regulated:     | 3 miRNAs     | 1 miRNAs       |
+|                             |                   |              |                |
+| (n=6 v 6)                   | Fold-change \>=1  |              |                |
+|                             |                   |              |                |
+|                             | Down-regulated:   |              |                |
+|                             |                   |              |                |
+|                             | Fold-change \<=-1 |              |                |
++-----------------------------+-------------------+--------------+----------------+
+
+```{r}
+AB_log2 <-read.csv("AB vs YC_log2.csv", header = T)
+
+ggplot(data = AB_log2, 
+       aes(x = miRNA, y = Log2FoldChange,
+           )) + 
+  geom_bar(stat = "identity", aes(fill = Log2FoldChange), position=position_dodge()) + 
+  ylab("Log2 Fold Change") + 
+  coord_flip() + scale_fill_gradient2(low='orange', mid='snow', high='blue')
+```
+
+### ABT vs YC
+
+Convert result into data frame, the filter
+
+```{r}
+res3 <- as.data.frame(res3)
+res3p <- res3[res3$pvalue<0.05,]
+res3padj <- res3[res3$padj<0.05,]
+res3logUp <- res3[res3$log2FoldChange>=1,]
+res3logDown <- res3[res3$log2FoldChange<=-1,]
+
+res3logUp
+res3logDown
+```
+
+**Comments:**
+
++-----------------------------+-------------------+--------------+----------------+
+| log2 Fold Change Comparison | Criteria          | Up-regulated | Down-regulated |
++=============================+===================+==============+================+
+| ABT vs YC                   | Up-regulated:     | 5 miRNAs     | 2 miRNAs       |
+|                             |                   |              |                |
+| (n=6 v 6)                   | Fold-change \>=1  |              |                |
+|                             |                   |              |                |
+|                             | Down-regulated:   |              |                |
+|                             |                   |              |                |
+|                             | Fold-change \<=-1 |              |                |
++-----------------------------+-------------------+--------------+----------------+
+
+```{r}
+ABT_log2 <-read.csv("ABT vs YC_log2.csv", header = T)
+
+ggplot(data = ABT_log2, 
+       aes(x = miRNA, y = Log2FoldChange,
+           )) + 
+  geom_bar(stat = "identity", aes(fill = Log2FoldChange), position=position_dodge()) + 
+  ylab("Log2 Fold Change") + 
+  coord_flip() + scale_fill_gradient2(low='orange', mid='snow', high='blue')
+```
+
+### Summary
+
+#### Log2 Fold Change: Up-regulated
+
+| MCI vs YC            | AB vs YC            | ABT vs YC           |
+|----------------------|---------------------|---------------------|
+| mmu-let-7a           |                     | mmu-miR-183         |
+| **mmu-miR-144**      | **mmu-miR-144**     | mmu-miR-1932        |
+| mmu-miR-155          | **mmu-miR-291a-5p** | **mmu-miR-291a-5p** |
+| mmu-miR-1947         | mmu-miR-690         | mmu-miR-295         |
+| mmu-miR-2134         |                     |                     |
+| **mmu-miR-429**      |                     | **mmu-miR-429**     |
+| [*mmu-miR-543*]{.ul} |                     |                     |
+
+##### Literature Search
+
+-   Elevated Levels of miR-144-3p Induce Cholinergic Degeneration by Impairing the Maturation of NGF in Alzheimer's Disease (doi: 10.3389/fcell.2021.667412)
+
+-   Knockdown of miR-429 Attenuates Aβ-Induced Neuronal Damage by Targeting SOX2 and BCL2 in Mouse Cortical Neurons (doi: 10.1007/s11064-018-2643-3)
+
+#### Log2 Fold Change: Down-regulated
+
+| MCI vs YC      | AB vs YC                 | ABT vs YC                |
+|----------------|--------------------------|--------------------------|
+| mmu-miR-1939   |                          |                          |
+| mmu-miR-380-3p | [***mmu-miR-543***]{.ul} | [***mmu-miR-543***]{.ul} |
+| mmu-miR-744    |                          | mmu-miR-720              |
+
+##### Literature Search
+
+-   miR-543: PubMed search - 211 results
+
+## Conclusion
+
+### Observation
+
+For this project, I used DESeq2 to analyze NanoString miRNA count data. The data did not show clear clustering with heatmap and PCA plot. PC1 shows 32% variance and PC2 shows 10% variance. Neither of the principle component suggests a strong distinction to separate the sample groups. Log2 fold change suggests some upregulated and downregulated miRNAs. In particular, I was interested in any miRNAs expressions with at least 2-fold differences. According to the summary table shown above, mmu-miR-144 marks the transition between mild cognitive impairment (MCI) and Amyloid-beta (Aβ) stage whereas mmu-miR-429 marks the transition between Aβ and Amyloid-beta + Tau (AβT)stage. Interenstingly, mmu-miR-543 is upregulated in MCI, but is downregulated in Aβ and AβT.
+
+### Future Direction
+
+Find out the pathways these miRNAs are involved in for further investigation of how they may contribute to the AD pathology.
+
+### Limitation
+
+Due to smaller input (less than 600 miRNAs) of the dataset, the DESeq2 normalization may not have been the most appropriate tool to assess this dataset. Therefore, I have also explored another package, NanoStringDiff (doi:%2010.1093/nar/gkw677). However, I have yet to figure out the appropriate design input to receive a result from this package (Error in Beta.full %\*% contrast : non-conformable arguments).
+
+#### NanoStringDiff (Work in Progress)
+
+\#\# Data Input
+
+directory \<- "/Users/phoebechum/Desktop/NanoString/Data Analysis/R Analysis/Raw Data.csv"
+
+designs = data.frame(group=c("MCI1","MCI2","MCI3","MCI4","MCI5","MCI6","YC1","YC2","YC3","YC4","YC5","YC6","AB1","AB2","AB3","AB4","AB5","AB6","ABT1","ABT2","ABT3","ABT4","ABT5","ABT6"))
+
+library("NanoStringDiff")
+
+NanoStringData=createNanoStringSetFromCsv(directory,header=TRUE,designs)
+
+NanoStringData
+
+pheno=pData(NanoStringData)
+
+group=pheno\$group
+
+design.full=model.matrix(\~0+group)
+
+design.full
+
+contrast = c(-1,1)
+
+NanoStringData=estNormalizationFactors(NanoStringData)
+
+positiveFactor(NanoStringData)
+
+negativeFactor(NanoStringData)
+
+housekeepingFactor(NanoStringData)
+
+result=glm.LRT(NanoStringData,design.full,contrast=contrast)
+
+head(result\$table)
+
+result
+
+\#\# Pairwise Comparisons
+
+endogenous=matrix(rpois(300,50),25,12)
+
+colnames(endogenous)=paste("Sample", 1:12)
+
+colnames(endogenous)=paste("Sample",1:12)
+
+positive=matrix(rpois(72,c(128,32,8,2,0.5,0.125)\*80),6,12)
+
+negative=matrix(rpois(96,10),8,12)
+
+housekeeping=matrix(rpois(36,100),3,12)
+
+designs=data.frame(group=c(rep("YC",4),rep("MCI",4),rep("AB",4)),
+
++ gender=rep(c("Male","Male","Female","Female"),3),
+
++ age=c(20,40,39,37,29,47,23,45,34,65,35,64))
+
+NanoStringData2=createNanoStringSet(endogenous,positive,
+
++ negative,housekeeping,designs)
+
+NanoStringData2
