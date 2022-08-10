@@ -1,4 +1,4 @@
-# DA_Assignment
+# Cerebrovascular miRNA Profile in Alzheimer's Disease
 
 I analyzed NanoString data that I have collected from my Alzheimer's Disease mouse model using RStudio for my Neuroscience, MS course assignment. 
 
